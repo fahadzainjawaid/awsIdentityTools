@@ -15,6 +15,7 @@ import {
 import fs from "fs";
 import os from "os";
 import path from "path";
+import ini from "ini";
 import {
   REGION,
   START_URL,
@@ -22,7 +23,6 @@ import {
   INCLUDE_ACCOUNTS
 } from "./config.mjs";
 
-// Clients
 const oidcClient = new SSOOIDCClient({ region: REGION });
 const ssoClient = new SSOClient({ region: REGION });
 
@@ -71,21 +71,21 @@ async function authenticateUser() {
 }
 
 async function listAllRoles(accessToken) {
-  const accounts = [];
+  const accountMap = new Map();
   let nextToken;
 
   do {
     const res = await ssoClient.send(new ListAccountsCommand({ accessToken, nextToken }));
-    accounts.push(...res.accountList);
+    for (const account of res.accountList) {
+      if (INCLUDE_ACCOUNTS.length && !INCLUDE_ACCOUNTS.includes(account.accountId)) continue;
+      accountMap.set(account.accountId, account.accountName);
+    }
     nextToken = res.nextToken;
   } while (nextToken);
 
   const roles = [];
 
-  for (const account of accounts) {
-    const accountId = account.accountId;
-    if (INCLUDE_ACCOUNTS.length && !INCLUDE_ACCOUNTS.includes(accountId)) continue;
-
+  for (const [accountId, accountName] of accountMap.entries()) {
     let roleToken;
     do {
       const res = await ssoClient.send(
@@ -94,7 +94,11 @@ async function listAllRoles(accessToken) {
 
       for (const role of res.roleList) {
         if (!ALLOWED_ROLE_NAMES.length || ALLOWED_ROLE_NAMES.includes(role.roleName)) {
-          roles.push({ accountId, roleName: role.roleName });
+          roles.push({
+            accountId,
+            accountName,
+            roleName: role.roleName
+          });
         }
       }
 
@@ -108,7 +112,7 @@ async function listAllRoles(accessToken) {
 async function fetchCredentialsForRoles(accessToken, roles) {
   const credentialsList = [];
 
-  for (const { accountId, roleName } of roles) {
+  for (const { accountId, roleName, accountName } of roles) {
     const res = await ssoClient.send(
       new GetRoleCredentialsCommand({ accessToken, accountId, roleName })
     );
@@ -117,6 +121,7 @@ async function fetchCredentialsForRoles(accessToken, roles) {
     credentialsList.push({
       accountId,
       roleName,
+      accountName,
       accessKeyId: creds.accessKeyId,
       secretAccessKey: creds.secretAccessKey,
       sessionToken: creds.sessionToken,
@@ -129,23 +134,97 @@ async function fetchCredentialsForRoles(accessToken, roles) {
   return credentialsList;
 }
 
-function writeToCredentialsFile(credsList) {
-  const filePath = path.join(os.homedir(), ".aws", "credentials");
-  const lines = [];
+function sanitizeProfileName(name) {
+  // Replace newlines or control chars with space, trim whitespace
+  return name.replace(/[\r\n]/g, " ").trim();
+}
 
-  for (const cred of credsList) {
-    const profile = `${cred.accountId}-${cred.roleName}`;
-    lines.push(
-      `[${profile}]
-aws_access_key_id = ${cred.accessKeyId}
-aws_secret_access_key = ${cred.secretAccessKey}
-aws_session_token = ${cred.sessionToken}
-`
-    );
+function generateProfileName(cred) {
+  // Format: "accountId-roleName-accountName"
+  // accountName can have spaces here (AWS CLI supports spaces in [ ])
+  return `${sanitizeProfileName(cred.accountName)}`;
+}
+
+function writeToCredentialsFile(credsList) {
+  const awsDir = path.join(os.homedir(), ".aws");
+  const filePath = path.join(awsDir, "credentials");
+
+  if (!fs.existsSync(awsDir)) {
+    fs.mkdirSync(awsDir, { recursive: true });
+    console.log(`📂 Created AWS config directory: ${awsDir}`);
   }
 
-  fs.appendFileSync(filePath, lines.join("\n"));
-  console.log(`\n📝 Credentials written to ${filePath}\n`);
+  // Read existing credentials file if exists
+  let existing = {};
+  if (fs.existsSync(filePath)) {
+    const content = fs.readFileSync(filePath, "utf-8");
+    existing = ini.parse(content);
+  }
+
+  // Remove profiles matching our generated profile names
+  for (const cred of credsList) {
+    const profileName = generateProfileName(cred);
+    if (existing[profileName]) {
+      delete existing[profileName];
+      console.log(`🗑 Removed old profile: [${profileName}]`);
+    }
+  }
+
+  // Add fresh profiles
+  for (const cred of credsList) {
+    const profileName = generateProfileName(cred);
+    existing[profileName] = {
+      aws_access_key_id: cred.accessKeyId,
+      aws_secret_access_key: cred.secretAccessKey,
+      aws_session_token: cred.sessionToken,
+      profile: cred.accountName
+    };
+    console.log(`➕ Added profile: [${profileName}]`);
+  }
+
+  fs.writeFileSync(filePath, ini.stringify(existing));
+  console.log(`\n📝 Credentials updated at ${filePath}`);
+}
+
+function writeToConfigFile(credsList) {
+  const awsDir = path.join(os.homedir(), ".aws");
+  const filePath = path.join(awsDir, "config");
+
+  if (!fs.existsSync(awsDir)) {
+    fs.mkdirSync(awsDir, { recursive: true });
+    console.log(`📂 Created AWS config directory: ${awsDir}`);
+  }
+
+  // Read existing config file if exists
+  let existing = {};
+  if (fs.existsSync(filePath)) {
+    const content = fs.readFileSync(filePath, "utf-8");
+    existing = ini.parse(content);
+  }
+
+  // Remove old profile sections
+  for (const cred of credsList) {
+    const profileName = generateProfileName(cred);
+    const sectionName = `profile ${profileName}`;
+    if (existing[sectionName]) {
+      delete existing[sectionName];
+      console.log(`🗑 Removed old config section: [${sectionName}]`);
+    }
+  }
+
+  // Add fresh profile sections
+  for (const cred of credsList) {
+    const profileName = generateProfileName(cred);
+    const sectionName = `profile ${profileName}`;
+    existing[sectionName] = {
+      region: REGION,
+      output: "json"
+    };
+    console.log(`➕ Added config section: [${sectionName}]`);
+  }
+
+  fs.writeFileSync(filePath, ini.stringify(existing));
+  console.log(`\n📝 Config updated at ${filePath}`);
 }
 
 (async () => {
@@ -158,6 +237,7 @@ aws_session_token = ${cred.sessionToken}
     }
     const credsList = await fetchCredentialsForRoles(token.accessToken, roles);
     writeToCredentialsFile(credsList);
+    writeToConfigFile(credsList);
   } catch (err) {
     console.error("❌ Error:", err);
   }
