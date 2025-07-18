@@ -177,7 +177,8 @@ function writeToCredentialsFile(credsList) {
       aws_access_key_id: cred.accessKeyId,
       aws_secret_access_key: cred.secretAccessKey,
       aws_session_token: cred.sessionToken,
-      profile: cred.accountName
+      profile: cred.accountName,
+      profile_name: cred.accountName,
     };
     console.log(`➕ Added profile: [${profileName}]`);
   }
