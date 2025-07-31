@@ -23,7 +23,7 @@ program
   .command('create')
   .description('Create OIDC setup for Azure DevOps and AWS integration')
   .requiredOption('-o, --org <organization>', 'Azure DevOps organization name')
-  .requiredOption('-p, --project <project>', 'Azure DevOps project name')
+  .option('-p, --project <project>', 'Azure DevOps project name (optional, if not provided allows any project in organization)')
   .option('-u, --pipeline-user <user>', 'Pipeline user name', 'azPipelinesUser')
   .option('--pipeline <pipeline>', 'Specific pipeline name (optional, if not provided allows any pipeline in project)')
   .action(async (options) => {
@@ -55,7 +55,7 @@ program
   .command('delete')
   .description('Delete OIDC setup for a specific pipeline user')
   .requiredOption('-o, --org <organization>', 'Azure DevOps organization name')
-  .requiredOption('-p, --project <project>', 'Azure DevOps project name')
+  .option('-p, --project <project>', 'Azure DevOps project name (optional, if not provided allows any project in organization)')
   .option('-u, --pipeline-user <user>', 'Pipeline user name', 'azPipelinesUser')
   .option('--pipeline <pipeline>', 'Specific pipeline name (optional, if not provided allows any pipeline in project)')
   .option('-a, --all', 'Delete everything including the OIDC provider (use with caution)')

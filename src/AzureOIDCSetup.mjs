@@ -10,7 +10,7 @@ export class AzureOIDCSetup {
     roleName,
     policyName,
     organization,
-    project,
+    project = null,
     pipeline = null,
     pipelineUser = 'azPipelinesUser',
     policyDocument
@@ -99,9 +99,17 @@ export class AzureOIDCSetup {
   }
 
   _getTrustPolicy(providerArn) {
-    const subClaim = this.pipeline
-      ? `sc://${this.organization}/${this.project}/${this.pipeline}`
-      : `sc://${this.organization}/${this.project}/*`;
+    let subClaim;
+    
+    if (this.project) {
+      // Specific project
+      subClaim = this.pipeline
+        ? `sc://${this.organization}/${this.project}/${this.pipeline}`
+        : `sc://${this.organization}/${this.project}/*`;
+    } else {
+      // Any project in organization
+      subClaim = `sc://${this.organization}/*`;
+    }
 
     // Extract the provider URL without https:// for condition keys
     const normalizedUrl = this.oidcProviderUrl.replace(/^https:\/\//, '');
@@ -148,7 +156,7 @@ export class AzureOIDCSetup {
     console.log(`▶️ Role ARN:          ${roleArn}`);
     console.log(`▶️ Thumbprint:        ${this.thumbprint}`);
     console.log(`▶️ Org:               ${this.organization}`);
-    console.log(`▶️ Project:           ${this.project}`);
+    console.log(`▶️ Project:           ${this.project || '<any project in organization>'}`);
     console.log(`▶️ Pipeline:          ${this.pipeline || '<any pipeline in project>'}`);
 
     console.log(`\n✅ Setup complete.`);
