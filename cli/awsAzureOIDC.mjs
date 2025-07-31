@@ -1,117 +1,90 @@
 #!/usr/bin/env node
 
-import { execSync } from 'child_process';
-import { argv } from 'process';
+import { Command } from 'commander';
+import { AzureOIDCSetup } from '../src/AzureOIDCSetup.mjs';
+import { 
+  oidcProviderUrl, 
+  audience, 
+  thumbprint,
+  getRoleName,
+  getPolicyName,
+  defaultPolicyDocument
+} from "./config.mjs";
 
-import { oidcProviderUrl, 
-audience, 
-thumbprint,
-roleName,
-policyName } from "./config.mjs";
+const program = new Command();
 
+program
+  .name('aws-azure-oidc')
+  .description('Manage OIDC setup for Azure DevOps and AWS integration')
+  .version('1.0.0');
 
-// 1. Parse CLI Arguments
-const pipelineUserArgIndex = argv.indexOf('--pipeline-user');
-const pipelineUser =
-  pipelineUserArgIndex !== -1 && argv[pipelineUserArgIndex + 1]
-    ? argv[pipelineUserArgIndex + 1]
-    : 'azPipelinesUser';
+// Create command
+program
+  .command('create')
+  .description('Create OIDC setup for Azure DevOps and AWS integration')
+  .requiredOption('-o, --org <organization>', 'Azure DevOps organization name')
+  .requiredOption('-p, --project <project>', 'Azure DevOps project name')
+  .option('-u, --pipeline-user <user>', 'Pipeline user name', 'azPipelinesUser')
+  .option('--pipeline <pipeline>', 'Specific pipeline name (optional, if not provided allows any pipeline in project)')
+  .action(async (options) => {
+    const { org, project, pipelineUser, pipeline } = options;
+    
+    const oidcSetup = new AzureOIDCSetup({
+      oidcProviderUrl,
+      audience,
+      thumbprint,
+      roleName: getRoleName(pipelineUser),
+      policyName: getPolicyName(pipelineUser),
+      organization: org,
+      project,
+      pipeline,
+      pipelineUser,
+      policyDocument: defaultPolicyDocument
+    });
 
-console.log(`\n🔧 Creating OIDC setup for pipeline user: ${pipelineUser}\n`);
+    try {
+      await oidcSetup.execute();
+    } catch (error) {
+      console.error('❌ Setup failed:', error.message);
+      process.exit(1);
+    }
+  });
 
+// Delete command
+program
+  .command('delete')
+  .description('Delete OIDC setup for a specific pipeline user')
+  .requiredOption('-o, --org <organization>', 'Azure DevOps organization name')
+  .requiredOption('-p, --project <project>', 'Azure DevOps project name')
+  .option('-u, --pipeline-user <user>', 'Pipeline user name', 'azPipelinesUser')
+  .option('--pipeline <pipeline>', 'Specific pipeline name (optional, if not provided allows any pipeline in project)')
+  .option('-a, --all', 'Delete everything including the OIDC provider (use with caution)')
+  .action(async (options) => {
+    const { org, project, pipelineUser, pipeline, all } = options;
+    
+    if (all) {
+      console.log('⚠️  WARNING: You are about to delete the OIDC provider. This will affect ALL pipeline users using this provider.');
+    }
+    
+    const oidcSetup = new AzureOIDCSetup({
+      oidcProviderUrl,
+      audience,
+      thumbprint,
+      roleName: getRoleName(pipelineUser),
+      policyName: getPolicyName(pipelineUser),
+      organization: org,
+      project,
+      pipeline,
+      pipelineUser,
+      policyDocument: defaultPolicyDocument
+    });
 
-try {
-  // 3. Create OIDC Provider if it doesn't exist
-  const createProviderCommand = `
-    aws iam create-open-id-connect-provider \
-      --url ${oidcProviderUrl} \
-      --client-id-list ${audience} \
-      --thumbprint-list ${thumbprint}
-  `;
+    try {
+      await oidcSetup.delete(all);
+    } catch (error) {
+      console.error('❌ Deletion failed:', error.message);
+      process.exit(1);
+    }
+  });
 
-  try {
-    execSync(createProviderCommand, { stdio: 'ignore' });
-    console.log('✅ OIDC Provider created.');
-  } catch {
-    console.log('ℹ️ OIDC Provider already exists or could not be created (might already be configured).');
-  }
-
-  // 4. Get OIDC Provider ARN
-  const getProviderArnCommand = `aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[*].Arn' --output text`;
-  const providerList = execSync(getProviderArnCommand).toString().trim().split('\n');
-  const providerArn = providerList.find(arn => arn.includes('pipelines.azure.com'));
-
-  if (!providerArn) throw new Error('OIDC Provider not found.');
-
-  // 5. Create IAM Trust Policy
-  const trustPolicy = {
-    Version: "2012-10-17",
-    Statement: [
-      {
-        Effect: "Allow",
-        Principal: {
-          Federated: providerArn
-        },
-        Action: "sts:AssumeRoleWithWebIdentity",
-        Condition: {
-          StringEquals: {
-            "pipelines.azure.com:aud": audience
-          }
-        }
-      }
-    ]
-  };
-
-  // 6. Create Role
-  const roleCreateCommand = `
-    aws iam create-role \
-      --role-name ${roleName} \
-      --assume-role-policy-document '${JSON.stringify(trustPolicy)}'
-  `;
-
-  try {
-    execSync(roleCreateCommand, { stdio: 'ignore' });
-    console.log('✅ IAM Role created.');
-  } catch {
-    console.log('ℹ️ IAM Role already exists or could not be created (might already exist).');
-  }
-
-  // 7. Attach Basic Policy (you may need to modify based on use case)
-  const policyDocument = {
-    Version: "2012-10-17",
-    Statement: [
-      {
-        Effect: "Allow",
-        Action: [
-          "s3:ListBucket",
-          "sts:AssumeRole"
-        ],
-        Resource: "*"
-      }
-    ]
-  };
-
-  const putPolicyCommand = `
-    aws iam put-role-policy \
-      --role-name ${roleName} \
-      --policy-name ${policyName} \
-      --policy-document '${JSON.stringify(policyDocument)}'
-  `;
-
-  execSync(putPolicyCommand);
-  console.log('✅ Policy attached to the IAM Role.\n');
-
-  // 8. Output Required Azure DevOps Config
-  const roleArn = `arn:aws:iam::${execSync('aws sts get-caller-identity --query Account --output text').toString().trim()}:role/${roleName}`;
-
-  console.log(`🔐 Use the following values in your Azure DevOps Service Connection:\n`);
-  console.log(`▶️ OIDC Provider URL: ${oidcProviderUrl}`);
-  console.log(`▶️ Audience:          ${audience}`);
-  console.log(`▶️ Role ARN:          ${roleArn}`);
-  console.log(`▶️ Thumbprint:        ${thumbprint}`);
-  console.log(`\n✅ Setup complete.`);
-
-} catch (error) {
-  console.error('❌ Error during setup:', error.message);
-  process.exit(1);
-}
+program.parse();
