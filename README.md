@@ -1,9 +1,10 @@
 # AWS Identity Tools
 
-A comprehensive collection of Node.js CLI tools for managing AWS credentials, authentication, and Azure DevOps OIDC integration with AWS. This toolkit simplifies AWS SSO login, credential management, and automated CI/CD workflows.
+A comprehensive collection of CLI tools for managing AWS credentials, authentication, Azure DevOps OIDC integration, resource inventory, and account cleanup. This toolkit simplifies AWS SSO login, credential management, automated CI/CD workflows, FinOps reporting, and sandbox account maintenance.
 
 ## 🚀 Features
 
+### Identity & Authentication
 - **AWS SSO Authentication**: Streamlined login process using AWS Identity Center (SSO)
 - **Profile Management**: Easy switching between AWS profiles
 - **Azure DevOps OIDC Integration**: Automated setup and management of OIDC providers for Azure DevOps pipelines
@@ -12,22 +13,28 @@ A comprehensive collection of Node.js CLI tools for managing AWS credentials, au
 - **Interactive Setup**: User-friendly prompts for configuration
 - **Trust Policy Management**: Dynamic trust policy generation for secure OIDC authentication
 
+### FinOps & Resource Management
+- **Resource Inventory**: Comprehensive multi-region resource scanning with cost estimates
+- **Cost Reporting**: Markdown reports with estimated monthly costs per resource
+- **Account Cleanup**: Automated deletion of AWS resources for sandbox account maintenance
+
 ## 📦 Installation
 
 ### Prerequisites
 
 - Node.js (version 14 or higher)
 - npm
-- An AWS account with AWS Identity Center (SSO) configured
-- AWS CLI installed and configured (for OIDC setup features)
+- AWS CLI v2 installed and configured
+- An AWS account with AWS Identity Center (SSO) configured (for SSO features)
 - Azure DevOps organization (for OIDC integration features)
+- `jq` and `bc` (for shell script tools)
 
 ### Installation
 
 1. Clone this repository:
 ```bash
 git clone <repository-url>
-cd awsUseCreds
+cd awsIdentityTools
 ```
 
 2. Install dependencies:
@@ -45,30 +52,52 @@ npm run compile
 npm run setup
 ```
 
+5. Make shell scripts executable:
+```bash
+chmod +x awsCleanup/awsCleanup.sh awsFinOps/awsResourceInventory.sh
+```
+
 ## ⚙️ Configuration
 
-Before using the tools, you need to configure your settings. **Important: The configuration file contains sensitive information and should not be committed to version control.**
+### AWS Identity Center Setup (Interactive)
 
-### Initial Setup
+Run the setup wizard to configure your AWS Identity Center settings:
+
+```bash
+node cli/setup.mjs
+```
+
+The setup wizard will prompt you for:
+- **Org name**: An identifier for this configuration (supports multiple orgs)
+- **AWS Region**: Your Identity Center region (e.g., `us-east-1`)
+- **SSO Start URL**: Your organization's AWS Identity Center URL
+- **Allowed role names**: Optional filter for specific roles
+- **Account IDs**: Optional filter for specific accounts
+
+Configuration is saved to `~/.aws/awsIdentityConfig.json` (outside the repo, safe from version control).
+
+**Multiple Organizations:**
+```bash
+# Configure multiple orgs
+node cli/setup.mjs  # Follow prompts, enter org name "production"
+node cli/setup.mjs  # Follow prompts, enter org name "development"
+
+# Use specific org when logging in
+awsLogin --org production
+awsLogin --org development
+```
+
+### Azure DevOps OIDC Configuration (Manual)
+
+For Azure DevOps OIDC integration, you need to manually configure `cli/config.mjs`:
 
 1. Copy the sample configuration file:
 ```bash
 cp cli/sample.config.mjs cli/config.mjs
 ```
 
-2. Edit `cli/config.mjs` with your specific settings:
+2. Edit `cli/config.mjs` with your Azure DevOps settings:
 
-#### AWS Identity Center Configuration
-```javascript
-export const REGION = 'us-east-1'; // Your Identity Center region
-export const START_URL = 'https://your-identity-center.awsapps.com/start';
-
-// Optional: restrict which roles or accounts to fetch
-export const ALLOWED_ROLE_NAMES = ["AdministratorAccess", "PowerUserAccess"];
-export const INCLUDE_ACCOUNTS = []; // Empty = all accounts
-```
-
-#### Azure DevOps OIDC Configuration
 ```javascript
 export const oidcProviderUrl = 'https://vstoken.dev.azure.com/<your-entra-id-tenant-id>';
 export const audience = 'api://AzureADTokenExchange';
@@ -90,6 +119,8 @@ export const defaultPolicyDocument = {
   ]
 };
 ```
+
+**Important:** The `config.mjs` file contains sensitive information and should not be committed to version control.
 
 ### Configuration Parameters
 
@@ -205,22 +236,105 @@ The OIDC setup process creates:
 
 The tool outputs all necessary configuration values for your Azure DevOps service connection.
 
+### AWS Resource Inventory (`awsResourceInventory.sh`)
+
+Generate a comprehensive inventory of AWS resources across regions with estimated monthly costs:
+
+```bash
+./awsFinOps/awsResourceInventory.sh [output_file] [regions]
+```
+
+**Arguments:**
+- `output_file`: Output markdown file (default: `resources.md`)
+- `regions`: Comma-separated list of regions (default: all enabled regions)
+
+**Examples:**
+```bash
+# Scan all regions, output to resources.md
+./awsFinOps/awsResourceInventory.sh
+
+# Custom output file
+./awsFinOps/awsResourceInventory.sh inventory.md
+
+# Specific regions only
+./awsFinOps/awsResourceInventory.sh output.md us-east-1,us-west-2
+```
+
+**Resources Scanned:**
+- EC2 instances, EBS volumes, AMIs, snapshots
+- RDS instances and clusters
+- Lambda functions
+- S3 buckets
+- DynamoDB tables
+- ElastiCache clusters
+- Load balancers (ALB, NLB, Classic)
+- NAT Gateways
+- ECS/EKS clusters
+- VPCs and networking resources
+- And more...
+
+**Output:**
+- Markdown report with resource details
+- Estimated monthly costs per resource
+- Total cost summary
+
+### AWS Account Cleanup (`awsCleanup.sh`)
+
+⚠️ **WARNING: This script permanently deletes resources. Only use on sandbox/test accounts.**
+
+Delete all resources in an AWS account for cleanup purposes:
+
+```bash
+./awsCleanup/awsCleanup.sh
+```
+
+**Features:**
+- Requires confirmation by typing `DELETE EVERYTHING`
+- 10-second countdown before each deletion (Ctrl+C to abort)
+- Targets `ca-central-1` and `us-east-1` regions (configurable in script)
+- Deletes resources in dependency order to avoid conflicts
+
+**Resources Deleted:**
+- CloudFormation stacks
+- ECS/EKS clusters and services
+- EC2 instances and Auto Scaling Groups
+- Load balancers (ALB, NLB, Classic)
+- RDS instances and clusters
+- ElastiCache clusters
+- Lambda functions
+- DynamoDB tables
+- SQS queues and SNS topics
+- ECR repositories
+- Secrets Manager secrets
+- SSM parameters
+- CloudWatch Log Groups
+- S3 buckets (including versioned objects)
+- VPCs and networking (NAT Gateways, IGWs, subnets)
+- IAM users (global)
+- Lightsail resources
+
 ## 📁 File Structure
 
 ```
-awsUseCreds/
+awsIdentityTools/
 ├── cli/
 │   ├── awsLogin.mjs         # SSO authentication tool
 │   ├── awsUseCreds.mjs      # Profile switching tool
 │   ├── awsAzureOIDC.mjs     # Azure DevOps OIDC management tool
 │   ├── config.mjs           # Configuration file (create from sample, not in repo)
-│   └── sample.config.mjs    # Configuration template
+│   ├── sample.config.mjs    # Configuration template
+│   └── setup.mjs            # Setup utilities
 ├── src/
 │   └── AzureOIDCSetup.mjs   # OIDC setup class implementation
-├── dist/                    # Compiled executables
+├── awsCleanup/
+│   └── awsCleanup.sh        # AWS account resource cleanup script
+├── awsFinOps/
+│   └── awsResourceInventory.sh  # Resource inventory and cost estimation
+├── dist/                    # Compiled executables (generated)
 ├── build.js                 # Build script
 ├── package.json             # Package configuration
-└── README.md               # This file
+├── LICENSE                  # GNU GPL v3 License
+└── README.md                # This file
 ```
 
 **Important**: The `config.mjs` file contains sensitive information (URLs, tenant IDs, etc.) and should not be committed to version control. Always use `sample.config.mjs` as a template and create your own `config.mjs` file.
@@ -291,6 +405,24 @@ npm run setup
    - Check that the generated trust policy matches your Azure DevOps setup
    - Ensure your service connection configuration matches the output from the tool
 
+### Shell Script Issues
+
+1. **"jq: command not found" or "bc: command not found"**
+   - Install required tools: `sudo apt install jq bc` (Linux) or `brew install jq bc` (macOS)
+
+2. **"AWS credentials are not configured or invalid"**
+   - Run `aws sts get-caller-identity` to verify credentials
+   - Use `awsLogin` to authenticate via SSO, or configure credentials manually
+
+3. **Cleanup script hangs or times out**
+   - Some resources take time to delete (e.g., RDS, EKS)
+   - Press Ctrl+C during countdown to skip a specific resource
+   - Check AWS Console for deletion progress
+
+4. **Resource inventory missing resources**
+   - Ensure your AWS credentials have read permissions for all services
+   - Check if resources are in regions not being scanned
+
 ### Configuration Issues
 
 1. **Missing config.mjs file**
@@ -315,6 +447,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 
 ## 📚 Dependencies
 
+### Node.js Dependencies
 - **@aws-sdk/client-iam**: AWS IAM client for managing roles and policies
 - **@aws-sdk/client-sso**: AWS SSO client for authentication
 - **@aws-sdk/client-sso-oidc**: AWS SSO OIDC client for token management
@@ -323,6 +456,11 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 - **inquirer**: Interactive command-line prompts
 - **ini**: INI file parser for AWS credentials/config files
 - **dotenv**: Environment variable loader
+
+### Shell Script Dependencies
+- **AWS CLI v2**: Required for all shell scripts
+- **jq**: JSON processor for parsing AWS CLI output
+- **bc**: Calculator for cost computations
 
 ## 🔐 Security
 
@@ -352,6 +490,17 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 - **Azure DevOps**: Secure integration without long-lived credentials
 - **Pipeline isolation**: Separate roles for different projects/pipelines
 - **Cross-account deployment**: Deploy to multiple AWS accounts from Azure DevOps
+
+### FinOps & Cost Management
+- **Resource auditing**: Generate comprehensive inventory reports
+- **Cost estimation**: Understand monthly costs across all regions
+- **Compliance reporting**: Document all resources in an account
+- **Budget planning**: Estimate costs before provisioning
+
+### Account Maintenance
+- **Sandbox cleanup**: Reset test/development accounts
+- **Cost control**: Remove unused resources to reduce costs
+- **Decommissioning**: Clean up accounts before closure
 
 ### Development Workflows
 - **Local development**: Easy switching between development/staging/production accounts
