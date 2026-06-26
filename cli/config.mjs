@@ -9,7 +9,7 @@ function loadConfigFile() {
     console.error('\n❌ Configuration file not found!');
     console.error(`   Expected location: ${CONFIG_PATH}`);
     console.error('\n   Please run setup first:');
-    console.error('   node cli/setup.mjs\n');
+    console.error('   node cli/configure.mjs\n');
     process.exit(1);
   }
 
@@ -20,7 +20,7 @@ function loadConfigFile() {
     console.error('\n❌ Failed to read configuration file!');
     console.error(`   Error: ${error.message}`);
     console.error('\n   Please run setup again:');
-    console.error('   node cli/setup.mjs\n');
+    console.error('   node cli/configure.mjs\n');
     process.exit(1);
   }
 }
@@ -36,7 +36,7 @@ export function getConfig(orgName) {
   if (!configFile.orgs || Object.keys(configFile.orgs).length === 0) {
     console.error('\n❌ No orgs configured!');
     console.error('\n   Please run setup to add an org:');
-    console.error('   node cli/setup.mjs\n');
+    console.error('   node cli/configure.mjs\n');
     process.exit(1);
   }
 
@@ -49,7 +49,7 @@ export function getConfig(orgName) {
     console.error(`\n❌ Org "${selectedOrg}" not found!`);
     console.error(`\n   Available orgs: ${orgNames.join(', ')}`);
     console.error('\n   Use --org <name> to specify an org, or run setup to add one:');
-    console.error('   node cli/setup.mjs\n');
+    console.error('   node cli/configure.mjs\n');
     process.exit(1);
   }
 
@@ -112,7 +112,14 @@ export const getPolicyName = (pipelineUser) =>
     ? oidcConfig.policyNamePattern.replace('{pipelineUser}', pipelineUser)
     : `${pipelineUser}-OIDCPolicy`;
 
-// Default policy document for OIDC roles
+// Default policy document for OIDC roles.
+//
+// ⚠️ ILLUSTRATIVE ONLY — this default is intentionally broad to get you started
+// and is NOT meant for production use. It grants wildcard actions on several
+// services against all resources ("Resource": "*"), which violates least
+// privilege. Override it for your environment by setting `oidc.defaultPolicyDocument`
+// in ~/.aws/awsIdentityConfig.json, scoped to the specific actions and resource
+// ARNs your pipeline actually needs.
 export const defaultPolicyDocument = oidcConfig.defaultPolicyDocument || {
   Version: "2012-10-17",
   Statement: [

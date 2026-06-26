@@ -64,7 +64,7 @@ chmod +x awsCleanup/awsCleanup.sh awsFinOps/awsResourceInventory.sh
 Run the setup wizard to configure your AWS Identity Center settings:
 
 ```bash
-node cli/setup.mjs
+node cli/configure.mjs
 ```
 
 The setup wizard will prompt you for:
@@ -79,8 +79,8 @@ Configuration is saved to `~/.aws/awsIdentityConfig.json` (outside the repo, saf
 **Multiple Organizations:**
 ```bash
 # Configure multiple orgs
-node cli/setup.mjs  # Follow prompts, enter org name "production"
-node cli/setup.mjs  # Follow prompts, enter org name "development"
+node cli/configure.mjs  # Follow prompts, enter org name "production"
+node cli/configure.mjs  # Follow prompts, enter org name "development"
 
 # Use specific org when logging in
 awsLogin --org production
@@ -323,7 +323,7 @@ awsIdentityTools/
 │   ├── awsAzureOIDC.mjs     # Azure DevOps OIDC management tool
 │   ├── config.mjs           # Configuration file (create from sample, not in repo)
 │   ├── sample.config.mjs    # Configuration template
-│   └── setup.mjs            # Setup utilities
+│   └── configure.mjs        # Setup utilities
 ├── src/
 │   └── AzureOIDCSetup.mjs   # OIDC setup class implementation
 ├── awsCleanup/
