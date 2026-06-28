@@ -83,6 +83,100 @@ export function getOIDCConfig() {
   return configFile.oidc || {};
 }
 
+// Matches angle-bracket placeholders left over from the sample config,
+// e.g. "<your entra ID tenant ID>" or "<certificate thumbprint>".
+const PLACEHOLDER_RE = /[<>]/;
+
+/**
+ * Fail loudly if a required OIDC value is empty or still a placeholder.
+ * @param {*} value - The value to validate
+ * @param {string} field - The field name (for the error message)
+ * @param {string} orgName - The Azure DevOps org this value belongs to
+ */
+function requireOIDCValue(value, field, orgName) {
+  const str = value === undefined || value === null ? '' : String(value).trim();
+  if (str === '' || PLACEHOLDER_RE.test(str)) {
+    console.error(`\n❌ OIDC configuration error for org "${orgName}".`);
+    console.error(`   Required field "${field}" is missing or still a placeholder.`);
+    console.error(`   Current value: ${JSON.stringify(value)}`);
+    console.error(`\n   Fix it at: ${CONFIG_PATH}`);
+    console.error(`   under oidc.orgs.${orgName}.${field}\n`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Resolve the OIDC configuration for a single Azure DevOps org.
+ *
+ * Supports a multi-org layout (oidc.orgs.<name> = { oidcProviderUrl, audience,
+ * thumbprint }) and falls back to a legacy flat oidc block as a single org.
+ * Crashes with a clear message if required values are empty/placeholder, if the
+ * requested org is missing, or if multiple orgs exist and none was specified.
+ *
+ * @param {string} [orgName] - Azure DevOps org name. Optional only when exactly one org is configured.
+ * @returns {{org: string, oidcProviderUrl: string, audience: string, thumbprint: string}}
+ */
+export function getOIDCOrgConfig(orgName) {
+  const configFile = loadConfigFile();
+  const oidc = configFile.oidc || {};
+
+  // Resolve the available orgs. Prefer the nested layout; fall back to a
+  // legacy flat oidc block treated as a single org.
+  let orgs = oidc.orgs;
+  if (!orgs || Object.keys(orgs).length === 0) {
+    if (oidc.oidcProviderUrl) {
+      orgs = {
+        [orgName || 'default']: {
+          oidcProviderUrl: oidc.oidcProviderUrl,
+          audience: oidc.audience,
+          thumbprint: oidc.thumbprint
+        }
+      };
+    } else {
+      console.error('\n❌ No OIDC orgs configured!');
+      console.error(`   Add an "oidc.orgs" section to: ${CONFIG_PATH}\n`);
+      process.exit(1);
+    }
+  }
+
+  const names = Object.keys(orgs);
+
+  // Pick the org: explicit --org, or the sole org if there's only one.
+  let selected = orgName;
+  if (!selected) {
+    if (names.length === 1) {
+      selected = names[0];
+    } else {
+      console.error('\n❌ Multiple OIDC orgs are configured — choose one with --org <name>.');
+      console.error(`   Available orgs: ${names.join(', ')}\n`);
+      process.exit(1);
+    }
+  }
+
+  if (!orgs[selected]) {
+    console.error(`\n❌ OIDC org "${selected}" not found!`);
+    console.error(`   Available orgs: ${names.join(', ')}\n`);
+    process.exit(1);
+  }
+
+  const orgCfg = orgs[selected];
+  const resolved = {
+    org: selected,
+    oidcProviderUrl: orgCfg.oidcProviderUrl,
+    audience: orgCfg.audience || oidc.audience || 'api://AzureADTokenExchange',
+    thumbprint: orgCfg.thumbprint
+  };
+
+  // Required values must be real, or we stop here rather than building a
+  // broken role (an empty url/thumbprint silently corrupted past runs).
+  requireOIDCValue(resolved.oidcProviderUrl, 'oidcProviderUrl', selected);
+  requireOIDCValue(resolved.audience, 'audience', selected);
+  requireOIDCValue(resolved.thumbprint, 'thumbprint', selected);
+
+  console.log(`🔗 Using Azure DevOps org: ${selected}`);
+  return resolved;
+}
+
 // OIDC configuration exports (loaded from config file)
 const oidcConfig = (() => {
   try {

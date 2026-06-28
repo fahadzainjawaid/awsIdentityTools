@@ -2,10 +2,8 @@
 
 import { Command } from 'commander';
 import { AzureOIDCSetup } from '../src/AzureOIDCSetup.mjs';
-import { 
-  oidcProviderUrl, 
-  audience, 
-  thumbprint,
+import {
+  getOIDCOrgConfig,
   getRoleName,
   getPolicyName,
   defaultPolicyDocument
@@ -22,20 +20,22 @@ program
 program
   .command('create')
   .description('Create OIDC setup for Azure DevOps and AWS integration')
-  .requiredOption('-o, --org <organization>', 'Azure DevOps organization name')
+  .option('-o, --org <organization>', 'Azure DevOps organization name (selects oidc.orgs.<name>; optional if only one org is configured)')
   .option('-p, --project <project>', 'Azure DevOps project name (optional, if not provided allows any project in organization)')
   .option('-u, --pipeline-user <user>', 'Pipeline user name', 'azPipelinesUser')
   .option('--pipeline <pipeline>', 'Specific pipeline name (optional, if not provided allows any pipeline in project)')
   .action(async (options) => {
     const { org, project, pipelineUser, pipeline } = options;
-    
+
+    const oidcOrg = getOIDCOrgConfig(org);
+
     const oidcSetup = new AzureOIDCSetup({
-      oidcProviderUrl,
-      audience,
-      thumbprint,
+      oidcProviderUrl: oidcOrg.oidcProviderUrl,
+      audience: oidcOrg.audience,
+      thumbprint: oidcOrg.thumbprint,
       roleName: getRoleName(pipelineUser),
       policyName: getPolicyName(pipelineUser),
-      organization: org,
+      organization: oidcOrg.org,
       project,
       pipeline,
       pipelineUser,
@@ -54,25 +54,27 @@ program
 program
   .command('delete')
   .description('Delete OIDC setup for a specific pipeline user')
-  .requiredOption('-o, --org <organization>', 'Azure DevOps organization name')
+  .option('-o, --org <organization>', 'Azure DevOps organization name (selects oidc.orgs.<name>; optional if only one org is configured)')
   .option('-p, --project <project>', 'Azure DevOps project name (optional, if not provided allows any project in organization)')
   .option('-u, --pipeline-user <user>', 'Pipeline user name', 'azPipelinesUser')
   .option('--pipeline <pipeline>', 'Specific pipeline name (optional, if not provided allows any pipeline in project)')
   .option('-a, --all', 'Delete everything including the OIDC provider (use with caution)')
   .action(async (options) => {
     const { org, project, pipelineUser, pipeline, all } = options;
-    
+
     if (all) {
       console.log('⚠️  WARNING: You are about to delete the OIDC provider. This will affect ALL pipeline users using this provider.');
     }
-    
+
+    const oidcOrg = getOIDCOrgConfig(org);
+
     const oidcSetup = new AzureOIDCSetup({
-      oidcProviderUrl,
-      audience,
-      thumbprint,
+      oidcProviderUrl: oidcOrg.oidcProviderUrl,
+      audience: oidcOrg.audience,
+      thumbprint: oidcOrg.thumbprint,
       roleName: getRoleName(pipelineUser),
       policyName: getPolicyName(pipelineUser),
-      organization: org,
+      organization: oidcOrg.org,
       project,
       pipeline,
       pipelineUser,

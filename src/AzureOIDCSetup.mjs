@@ -64,21 +64,34 @@ export class AzureOIDCSetup {
         --thumbprint-list ${this.thumbprint}
     `;
     try {
-      execSync(createProviderCommand, { stdio: 'ignore' });
+      execSync(createProviderCommand, { stdio: 'pipe' });
       console.log('✅ OIDC Provider created.');
-    } catch {
-      console.log('ℹ️ OIDC Provider already exists or could not be created (might already exist).');
+    } catch (error) {
+      const msg = (error.stderr?.toString() || error.message || '').trim();
+      // Reusing an existing provider is fine; anything else is a real failure
+      // and must surface rather than be silently swallowed.
+      if (msg.includes('EntityAlreadyExists')) {
+        console.log('ℹ️ OIDC Provider already exists, reusing it.');
+      } else {
+        throw new Error(`Failed to create OIDC provider: ${msg}`);
+      }
     }
   }
 
   async _getProviderArn() {
+    // `--output text` separates multiple ARNs with tabs (and/or newlines),
+    // so split on any whitespace rather than just '\n'.
     const providerList = execSync(`aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[*].Arn' --output text`)
       .toString()
       .trim()
-      .split('\n');
+      .split(/\s+/)
+      .filter(Boolean);
     const normalizedUrl = this.oidcProviderUrl.replace(/^https:\/\//, '');
-    const providerArn = providerList.find(arn => arn.endsWith(normalizedUrl));
-    if (!providerArn) throw new Error('OIDC Provider not found.');
+    // Match the provider whose URL is exactly this one. A previous `endsWith`
+    // check matched everything when normalizedUrl was empty, silently picking
+    // the wrong provider.
+    const providerArn = providerList.find(arn => arn.split(':oidc-provider/')[1] === normalizedUrl);
+    if (!providerArn) throw new Error(`OIDC Provider not found for URL: ${normalizedUrl}`);
     return providerArn;
   }
 

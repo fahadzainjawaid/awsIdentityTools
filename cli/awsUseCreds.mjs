@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { spawnSync } from "child_process";
 import fs from "fs";
 import ini from "ini";
 import inquirer from "inquirer";
@@ -90,6 +91,32 @@ async function updateCredentials() {
     );
   } else {
     console.log(`Profile "${profileToSet}" has been set as the default profile.`);
+  }
+
+  verifyCallerIdentity();
+}
+
+// Confirm the profile switch took effect by querying the active identity with
+// the AWS CLI. Uses the (now updated) default profile.
+function verifyCallerIdentity() {
+  console.log("\nVerifying profile switch with 'aws sts get-caller-identity'...");
+  const result = spawnSync("aws", ["sts", "get-caller-identity"], { stdio: "inherit" });
+
+  if (result.error) {
+    if (result.error.code === "ENOENT") {
+      console.error("Could not verify: AWS CLI ('aws') was not found on your PATH.");
+    } else {
+      console.error("Could not verify caller identity:", result.error.message);
+    }
+    return;
+  }
+
+  if (result.status !== 0) {
+    console.error(
+      `'aws sts get-caller-identity' exited with code ${result.status}. The profile switch may not be valid.`
+    );
+  } else {
+    console.log(`Profile switch to "${profileToSet}" verified successfully.`);
   }
 }
 

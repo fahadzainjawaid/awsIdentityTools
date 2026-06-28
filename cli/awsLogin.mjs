@@ -16,28 +16,31 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import ini from "ini";
+import { spawnSync } from "child_process";
 import { getConfig } from "./config.mjs";
 
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
   let orgName = null;
-  
+  let profile = null;
+
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--org' && args[i + 1]) {
       orgName = args[i + 1];
-      break;
-    }
-    if (args[i].startsWith('--org=')) {
+    } else if (args[i].startsWith('--org=')) {
       orgName = args[i].split('=')[1];
-      break;
+    } else if (args[i] === '--profile' && args[i + 1]) {
+      profile = args[i + 1];
+    } else if (args[i].startsWith('--profile=')) {
+      profile = args[i].split('=')[1];
     }
   }
-  
-  return { orgName };
+
+  return { orgName, profile };
 }
 
-const { orgName } = parseArgs();
+const { orgName, profile } = parseArgs();
 const { REGION, START_URL, ALLOWED_ROLE_NAMES, INCLUDE_ACCOUNTS } = getConfig(orgName);
 
 const oidcClient = new SSOOIDCClient({ region: REGION });
@@ -258,6 +261,44 @@ function writeToConfigFile(credsList) {
   console.log(`\n📝 Config updated at ${filePath}`);
 }
 
+// Locate the sibling awsUseCreds script relative to the currently running file
+// (process.argv[1]). This works across all run modes: development
+// (cli/awsUseCreds.mjs), the bundled dist (dist/awsUseCreds.cjs), and the npm
+// global bin symlink (.../bin/awsUseCreds, no extension).
+function resolveUseCredsScript() {
+  const self = process.argv[1] || "";
+  const dir = path.dirname(self);
+  const ext = path.extname(self); // .mjs (dev), .cjs (dist), "" (npm bin symlink)
+  const candidates = [
+    path.join(dir, `awsUseCreds${ext}`),
+    path.join(dir, "awsUseCreds.mjs"),
+    path.join(dir, "awsUseCreds.cjs"),
+    path.join(dir, "awsUseCreds")
+  ];
+  return candidates.find((c) => fs.existsSync(c)) || null;
+}
+
+// Run awsUseCreds to set the given profile as the default.
+function switchToProfile(profileName) {
+  const useCredsScript = resolveUseCredsScript();
+
+  console.log(`\n🔁 Switching default profile to "${profileName}" via awsUseCreds...`);
+
+  // Prefer running the resolved sibling script directly with node; fall back to
+  // the awsUseCreds command on PATH if the sibling can't be located.
+  const result = useCredsScript
+    ? spawnSync(process.execPath, [useCredsScript, `--profile=${profileName}`], { stdio: "inherit" })
+    : spawnSync("awsUseCreds", [`--profile=${profileName}`], { stdio: "inherit", shell: true });
+
+  if (result.error) {
+    console.error(`❌ Failed to launch awsUseCreds: ${result.error.message}`);
+    process.exitCode = 1;
+  } else if (result.status !== 0) {
+    console.error(`❌ Failed to switch to profile "${profileName}" (exit code ${result.status}).`);
+    process.exitCode = result.status || 1;
+  }
+}
+
 (async () => {
   try {
     const token = await authenticateUser();
@@ -269,6 +310,10 @@ function writeToConfigFile(credsList) {
     const credsList = await fetchCredentialsForRoles(token.accessToken, roles);
     writeToCredentialsFile(credsList);
     writeToConfigFile(credsList);
+
+    if (profile) {
+      switchToProfile(profile);
+    }
   } catch (err) {
     console.error("❌ Error:", err);
   }
